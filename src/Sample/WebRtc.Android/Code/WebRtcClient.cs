@@ -12,65 +12,48 @@ namespace WebRtc.Android.Code
 {
     public interface IWebRtcObserver
     {
-        void OnGenerateCandiate(IceCandidate iceCandidate);
-        void OnIceConnectionStateChanged(PeerConnection.IceConnectionState iceConnectionState);
-        void OnOpenDataChannel();
-        void OnReceiveData(byte[] data);
-        void OnReceiveMessage(string message);
         void OnConnectWebRtc();
+
         void OnDisconnectWebRtc();
+
+        void OnGenerateCandiate(IceCandidate iceCandidate);
+
+        void OnIceConnectionStateChanged(PeerConnection.IceConnectionState iceConnectionState);
+
+        void OnOpenDataChannel();
+
+        void OnReceiveData(byte[] data);
+
+        void OnReceiveMessage(string message);
     }
 
     public class WebRtcClient : Java.Lang.Object, PeerConnection.IObserver, DataChannel.IObserver
     {
+        private readonly object _connectionLock = new object();
         private readonly Context _context;
 
+        private readonly List<PeerConnection.IceServer> _iceServers;
+        private readonly SurfaceViewRenderer _localView;
         private readonly IWebRtcObserver _observer;
 
-        private readonly SurfaceViewRenderer _remoteView;
-        private readonly SurfaceViewRenderer _localView;
-
-        private readonly List<PeerConnection.IceServer> _iceServers;
-
-        private IEglBase _eglBase;
-        private PeerConnectionFactory _peerConnectionFactory;
-
-        private VideoTrack _localVideoTrack;
-        private AudioTrack _localAudioTrack;
-
-        private readonly object _connectionLock = new object();
-        private PeerConnection _peerConnection;
+        //private readonly SurfaceViewRenderer _remoteView;
         private DataChannel _dataChannel;
 
-        private (PeerConnection peer, DataChannel data) _connection
-        {
-            get
-            {
-                if (_peerConnection == null)
-                {
-                    lock (_connectionLock)
-                    {
-                        if (_peerConnection == null)
-                        {
-                            _peerConnection = SetupPeerConnection();
-                        }
-                    }
-                }
-
-                return (_peerConnection, _dataChannel);
-            }
-        }
-
+        private IEglBase _eglBase;
         private bool _isConnected;
+        private AudioTrack _localAudioTrack;
+        private VideoTrack _localVideoTrack;
+        private PeerConnection _peerConnection;
+        private PeerConnectionFactory _peerConnectionFactory;
 
         public WebRtcClient(
             Context context,
-            SurfaceViewRenderer remoteView,
+            //SurfaceViewRenderer remoteView,
             SurfaceViewRenderer localView,
             IWebRtcObserver observer)
         {
             _context = context;
-            _remoteView = remoteView;
+            //_remoteView = remoteView;
             _localView = localView;
 
             _observer = observer;
@@ -96,13 +79,14 @@ namespace WebRtc.Android.Code
                 .CreatePeerConnectionFactory();
 
             InitView(_localView);
-            InitView(_remoteView);
+            //InitView(_remoteView);
 
             var cameraEnum = new Camera2Enumerator(_context);
             var deviceNames = cameraEnum.GetDeviceNames();
-            var cameraName = deviceNames.First(dn => DeviceInfo.DeviceType == DeviceType.Virtual
-                ? cameraEnum.IsBackFacing(dn)
-                : cameraEnum.IsFrontFacing(dn));
+            var cameraName = deviceNames.First();
+            //deviceNames.First(dn => DeviceInfo.DeviceType == DeviceType.Virtual
+            //? cameraEnum.IsBackFacing(dn)
+            //: cameraEnum.IsFrontFacing(dn));
             var videoCapturer = cameraEnum.CreateCapturer(cameraName, null);
 
             var localVideoSource = _peerConnectionFactory.CreateVideoSource(false);
@@ -116,8 +100,27 @@ namespace WebRtc.Android.Code
             _localVideoTrack = _peerConnectionFactory.CreateVideoTrack("video0", localVideoSource);
             _localVideoTrack.AddSink(_localView);
 
-            var localAudioSource = _peerConnectionFactory.CreateAudioSource(new MediaConstraints());
-            _localAudioTrack = _peerConnectionFactory.CreateAudioTrack("audio0", localAudioSource);
+            //var localAudioSource = _peerConnectionFactory.CreateAudioSource(new MediaConstraints());
+            //_localAudioTrack = _peerConnectionFactory.CreateAudioTrack("audio0", localAudioSource);
+        }
+
+        private (PeerConnection peer, DataChannel data) _connection
+        {
+            get
+            {
+                if (_peerConnection == null)
+                {
+                    lock (_connectionLock)
+                    {
+                        if (_peerConnection == null)
+                        {
+                            _peerConnection = SetupPeerConnection();
+                        }
+                    }
+                }
+
+                return (_peerConnection, _dataChannel);
+            }
         }
 
         public void Connect(Action<SessionDescription, string> completionHandler)
@@ -137,7 +140,6 @@ namespace WebRtc.Android.Code
                         completionHandler(null, err);
                     }),
                     sdp);
-
             }), mediaConstraints);
         }
 
@@ -164,6 +166,25 @@ namespace WebRtc.Android.Code
                     }
                 });
             }
+        }
+
+        public void ReceiveAnswer(SessionDescription answerSdp, Action<SessionDescription, string> completionHandler)
+        {
+            _connection.peer.SetRemoteDescription(
+                SdpObserver.OnSet(() =>
+                {
+                    completionHandler(answerSdp, string.Empty);
+                },
+                (err) =>
+                {
+                    completionHandler(null, err);
+                }),
+                answerSdp);
+        }
+
+        public void ReceiveCandidate(IceCandidate candidate)
+        {
+            _connection.peer.AddIceCandidate(candidate);
         }
 
         public void ReceiveOffer(SessionDescription offerSdp, Action<SessionDescription, string> completionHandler)
@@ -198,20 +219,6 @@ namespace WebRtc.Android.Code
                 offerSdp);
         }
 
-        public void ReceiveAnswer(SessionDescription answerSdp, Action<SessionDescription, string> completionHandler)
-        {
-            _connection.peer.SetRemoteDescription(
-                SdpObserver.OnSet(() =>
-                {
-                    completionHandler(answerSdp, string.Empty);
-                },
-                (err) =>
-                {
-                    completionHandler(null, err);
-                }),
-                answerSdp);
-        }
-
         public bool SendMessage(string message)
         {
             if (_connection.data != null && _connection.data.InvokeState() == DataChannel.State.Open)
@@ -225,30 +232,11 @@ namespace WebRtc.Android.Code
             return false;
         }
 
-        public void ReceiveCandidate(IceCandidate candidate)
-        {
-            _connection.peer.AddIceCandidate(candidate);
-        }
-
         private void InitView(SurfaceViewRenderer view)
         {
             view.SetMirror(true);
             view.SetEnableHardwareScaler(true);
             view.Init(_eglBase.EglBaseContext, null);
-        }
-
-        private PeerConnection SetupPeerConnection()
-        {
-            var rtcConfig = new PeerConnection.RTCConfiguration(_iceServers);
-
-            var pc = _peerConnectionFactory.CreatePeerConnection(
-                rtcConfig,
-                this);
-
-            pc.AddTrack(_localVideoTrack, new[] { "stream0" });
-            pc.AddTrack(_localAudioTrack, new[] { "stream0" });
-
-            return pc;
         }
 
         private DataChannel SetupDataChannel()
@@ -264,17 +252,32 @@ namespace WebRtc.Android.Code
             return dc;
         }
 
+        private PeerConnection SetupPeerConnection()
+        {
+            var rtcConfig = new PeerConnection.RTCConfiguration(_iceServers);
+
+            var pc = _peerConnectionFactory.CreatePeerConnection(
+                rtcConfig,
+                this);
+
+            pc.AddTrack(_localVideoTrack, new[] { "stream0" });
+            //pc.AddTrack(_localAudioTrack, new[] { "stream0" });
+
+            return pc;
+        }
+
         #region PeerConnectionObserver
+
         public void OnAddStream(MediaStream p0)
         {
             System.Diagnostics.Debug.WriteLine($"{nameof(OnAddStream)}");
 
             var videoTracks = p0?.VideoTracks?.OfType<VideoTrack>();
-            videoTracks?.FirstOrDefault()?.AddSink(_remoteView);
+            //videoTracks?.FirstOrDefault()?.AddSink(_remoteView);
 
-            var audioTracks = p0?.AudioTracks?.OfType<AudioTrack>();
-            audioTracks?.FirstOrDefault()?.SetEnabled(true);
-            audioTracks?.FirstOrDefault()?.SetVolume(10);
+            //var audioTracks = p0?.AudioTracks?.OfType<AudioTrack>();
+            //audioTracks?.FirstOrDefault()?.SetEnabled(true);
+            //audioTracks?.FirstOrDefault()?.SetVolume(10);
         }
 
         public void OnAddTrack(RtpReceiver p0, MediaStream[] p1)
@@ -354,9 +357,11 @@ namespace WebRtc.Android.Code
         {
             System.Diagnostics.Debug.WriteLine($"{nameof(OnSignalingChange)}");
         }
-        #endregion
+
+        #endregion PeerConnectionObserver
 
         #region DataChannelObserver
+
         public void OnBufferedAmountChange(long p0)
         {
             System.Diagnostics.Debug.WriteLine($"{nameof(OnBufferedAmountChange)}");
@@ -385,21 +390,6 @@ namespace WebRtc.Android.Code
             System.Diagnostics.Debug.WriteLine($"{nameof(OnStateChange)}");
         }
 
-        public void OnConnectionChange(PeerConnection.PeerConnectionState newState)
-        {
-            System.Diagnostics.Debug.WriteLine($"{nameof(OnConnectionChange)}:{newState}");
-        }
-
-        public void OnSelectedCandidatePairChanged(CandidatePairChangeEvent e)
-        {
-            System.Diagnostics.Debug.WriteLine($"{nameof(OnSelectedCandidatePairChanged)}:{e.Reason}");
-        }
-
-        public void OnTrack(RtpTransceiver transceiver)
-        {
-            System.Diagnostics.Debug.WriteLine($"{nameof(OnTrack)}:{transceiver.MediaType}");
-        }
-        #endregion
+        #endregion DataChannelObserver
     }
 }
-

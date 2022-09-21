@@ -3,6 +3,7 @@ using Newtonsoft.Json;
 using Square.OkHttp3;
 using System;
 using WebRtc.Android.Code;
+using WebRTC.Shared;
 
 namespace WebRtc.Android.Observers
 {
@@ -13,11 +14,6 @@ namespace WebRtc.Android.Observers
         public WebSocketObserver(Action<SignalingMessage> readMessage)
         {
             _readMessage = readMessage;
-        }
-
-        public override void OnOpen(IWebSocket webSocket, Response response)
-        {
-            base.OnOpen(webSocket, response);
         }
 
         public override void OnFailure(IWebSocket webSocket, Throwable t, Response response)
@@ -31,6 +27,11 @@ namespace WebRtc.Android.Observers
 
             var msg = JsonConvert.DeserializeObject<SignalingMessage>(text);
             _readMessage(msg);
+        }
+
+        public override void OnOpen(IWebSocket webSocket, Response response)
+        {
+            base.OnOpen(webSocket, response);
         }
     }
 }

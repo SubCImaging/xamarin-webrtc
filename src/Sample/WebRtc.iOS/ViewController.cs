@@ -24,12 +24,6 @@ namespace WebRtc.iOS
             _webRtcClient = new WebRtcClient(this);
         }
 
-        public override void ViewDidLoad()
-        {
-            base.ViewDidLoad();
-            // Perform any additional setup after loading the view, typically from a nib.            
-        }
-
         public override void ViewDidAppear(bool animated)
         {
             base.ViewDidAppear(animated);
@@ -67,7 +61,7 @@ namespace WebRtc.iOS
 
             videoContainer.SubviewsDoNotTranslateAutoresizingMaskIntoConstraints();
             controlsContainer.SubviewsDoNotTranslateAutoresizingMaskIntoConstraints();
-            View.SubviewsDoNotTranslateAutoresizingMaskIntoConstraints();           
+            View.SubviewsDoNotTranslateAutoresizingMaskIntoConstraints();
 
             videoContainer.AddConstraints(new[]
             {
@@ -145,8 +139,14 @@ namespace WebRtc.iOS
                     _socket.Open();
                 }));
 
-                PresentViewController(alertVc, true, null);                
+                PresentViewController(alertVc, true, null);
             });
+        }
+
+        public override void ViewDidLoad()
+        {
+            base.ViewDidLoad();
+            // Perform any additional setup after loading the view, typically from a nib.
         }
 
         private void ConnectButton_TouchUpInside(object sender, EventArgs e)
@@ -170,12 +170,76 @@ namespace WebRtc.iOS
             _webRtcClient.Disconnect();
         }
 
+        private void ReadMessage(SignalingMessage msg)
+        {
+            if (msg.Type?.Equals(RTCSdpType.Offer.ToString(), StringComparison.OrdinalIgnoreCase) == true)
+            {
+                _webRtcClient.ReceiveOffer(new RTCSessionDescription(RTCSdpType.Offer, msg.Sdp), (sdp, err) =>
+                {
+                    if (err == null)
+                    {
+                        SendSdp(sdp);
+                    }
+                });
+            }
+            else if (msg.Type?.Equals(RTCSdpType.Answer.ToString(), StringComparison.OrdinalIgnoreCase) == true)
+            {
+                _webRtcClient.ReceiveAnswer(new RTCSessionDescription(RTCSdpType.Answer, msg.Sdp), (sdp, err) =>
+                {
+                });
+            }
+            else if (msg.Candidate != null)
+            {
+                _webRtcClient.ReceiveCandidate(new RTCIceCandidate(msg.Candidate.Sdp, msg.Candidate.SdpMLineIndex, msg.Candidate.SdpMid));
+            }
+        }
+
+        private void SendCandidate(RTCIceCandidate iceCandidate)
+        {
+            var can = new Candidate()
+            {
+                Sdp = iceCandidate.Sdp,
+                SdpMLineIndex = iceCandidate.SdpMLineIndex,
+                SdpMid = iceCandidate.SdpMid
+            };
+            var signal = new SignalingMessage() { Candidate = can };
+            SendViaSocket(signal);
+        }
+
+        private void SendSdp(RTCSessionDescription sdp)
+        {
+            var signal = new SignalingMessage()
+            {
+                Type = sdp.Type.ToString(),
+                Sdp = sdp.Sdp,
+            };
+            SendViaSocket(signal);
+        }
+
+        private void SendViaSocket(SignalingMessage msg)
+        {
+            var json = JsonConvert.SerializeObject(msg);
+            var nsMsg = new NSString(json, NSStringEncoding.UTF8);
+            _socket.Send(nsMsg);
+        }
+
         private void SendWaveButton_TouchUpInside(object sender, EventArgs e)
         {
             _webRtcClient.SendMessage("👋");
         }
 
         #region IWebRtcClientDelegate
+
+        public void DidConnectWebRtc()
+        {
+            System.Diagnostics.Debug.WriteLine($"{nameof(DidConnectWebRtc)}");
+        }
+
+        public void DidDisconnectWebRtc()
+        {
+            System.Diagnostics.Debug.WriteLine($"{nameof(DidDisconnectWebRtc)}");
+        }
+
         public void DidGenerateCandiate(RTCIceCandidate iceCandidate)
         {
             System.Diagnostics.Debug.WriteLine($"{nameof(DidGenerateCandiate)}");
@@ -209,75 +273,12 @@ namespace WebRtc.iOS
             }
         }
 
-        public void DidConnectWebRtc()
-        {
-            System.Diagnostics.Debug.WriteLine($"{nameof(DidConnectWebRtc)}");
-        }
-
-        public void DidDisconnectWebRtc()
-        {
-            System.Diagnostics.Debug.WriteLine($"{nameof(DidDisconnectWebRtc)}");
-        }
-        #endregion
-
-        private void SendSdp(RTCSessionDescription sdp)
-        {
-            var signal = new SignalingMessage()
-            {
-                Type = sdp.Type.ToString(),
-                Sdp = sdp.Sdp,                
-            };
-            SendViaSocket(signal);
-        }
-
-        private void SendCandidate(RTCIceCandidate iceCandidate)
-        {
-            var can = new Candidate()
-            {                
-                Sdp = iceCandidate.Sdp,
-                SdpMLineIndex = iceCandidate.SdpMLineIndex,
-                SdpMid = iceCandidate.SdpMid
-            };
-            var signal = new SignalingMessage() { Candidate = can };
-            SendViaSocket(signal);
-        }
-
-        private void SendViaSocket(SignalingMessage msg)
-        {
-            var json = JsonConvert.SerializeObject(msg);
-            var nsMsg = new NSString(json, NSStringEncoding.UTF8);
-            _socket.Send(nsMsg);
-        }
+        #endregion IWebRtcClientDelegate
 
         private void SocketReceiveMessage(object sender, WebSocketReceivedMessageEventArgs args)
         {
             var msg = JsonConvert.DeserializeObject<SignalingMessage>(args.Message.ToString());
             ReadMessage(msg);
-        }
-
-        private void ReadMessage(SignalingMessage msg)
-        {
-            if (msg.Type?.Equals(RTCSdpType.Offer.ToString(), StringComparison.OrdinalIgnoreCase) == true)
-            {
-                _webRtcClient.ReceiveOffer(new RTCSessionDescription(RTCSdpType.Offer, msg.Sdp), (sdp, err) =>
-                {
-                    if (err == null)
-                    {
-                        SendSdp(sdp);
-                    }
-                });
-            }
-            else if (msg.Type?.Equals(RTCSdpType.Answer.ToString(), StringComparison.OrdinalIgnoreCase) == true)
-            {
-                _webRtcClient.ReceiveAnswer(new RTCSessionDescription(RTCSdpType.Answer, msg.Sdp), (sdp, err) =>
-                {
-
-                });
-            }
-            else if (msg.Candidate != null)
-            {
-                _webRtcClient.ReceiveCandidate(new RTCIceCandidate(msg.Candidate.Sdp, msg.Candidate.SdpMLineIndex, msg.Candidate.SdpMid));
-            }
         }
     }
 }
